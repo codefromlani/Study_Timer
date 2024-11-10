@@ -66,6 +66,56 @@ ACHIEVEMENTS = {
     )
 }
 
+# Initialize user achievements
+user_stats.achievements = ACHIEVEMENTS.copy()
+
+def update_streak():
+    """Update the user's study streak based on the last study date"""
+    today = datetime.now().date()
+
+    if user_stats.last_study_date is None:
+        user_stats.current_streak = 1
+    else:
+        days_diff = (today - user_stats.last_study_date.date()).days
+
+        if days_diff == 0: # Already studied today
+            return
+        elif days_diff == 1:  # Consecutive day
+            user_stats.current_streak += 1
+        else: # Streak broken
+            user_stats.current_streak = 1
+
+    user_stats.longest_streak = max(user_stats.current_streak, user_stats.longest_streak)
+    user_stats.last_study_date = datetime.now()
+
+def check_achievements() -> List[Achievement]:
+    """Check and update achievements, return newly unlocked ones"""
+    newly_unlocked = []
+
+    # First session achievement
+    if len(study_sessions) == 1 and not user_stats.achievements["first_session"].unlocked:
+        user_stats.achievements["first_session"].unlocked = True
+        user_stats.achievements["first_session"].unlocked_date = datetime.now()
+        newly_unlocked.append(user_stats.achievements["first_session"])
+
+    # Streak achievements
+    if user_stats.current_streak >= 3 and not user_stats.achievements["three_day_streak"].unlocked:
+        user_stats.achievements["three_day_streak"].unlocked = True
+        user_stats.achievements["three_day_streak"].unlocked_date = datetime.now()
+        newly_unlocked.append(user_stats.achievements["three_day_streak"])
+
+    if user_stats.current_streak >= 7 and not user_stats.achievements["week_streak"].unlocked:
+        user_stats.achievements["week_streak"].unlocked = True
+        user_stats.achievements["week_streak"].unlocked_date = datetime.now()
+        newly_unlocked.append(user_stats.achievements["week_streak"])
+
+    # Study master achievement (10 hours = 600 minutes )
+    if user_stats.current_streak >= 3 and not user_stats.achievements["study_master"].unlocked:
+        user_stats.achievements["study_master"].unlocked = True
+        user_stats.achievements["study_master"].unlocked_date = datetime.now()
+        newly_unlocked.append(user_stats.achievements["study_master"])
+
+    return newly_unlocked
 
 @app.get("/")
 async def root():
@@ -99,8 +149,8 @@ async def get_timer_status():
 
 @app.post("/timer/stop")
 async def stop_timer():
-    """Stop the current timer"""
-    global active_timer
+    """Stop the current timer and update achievements"""
+    global active_timer, user_stats
     if not active_timer.is_running:
         raise HTTPException(status_code=400, detail="Timer is not running")
     
@@ -115,4 +165,27 @@ async def stop_timer():
     )
     study_sessions.append(session)
 
-    return {"message": "Timer stopped successfully"}
+    # Update user stats
+    user_stats.total_study_time += session.duration
+    update_streak()
+
+    # Check for new achievements
+    new_achievements = check_achievements()
+
+    return {
+        "message": "Timer stopped successfully",
+        "session": session,
+        "streak": user_stats.current_streak,
+        "new_achievement": new_achievements
+    }
+
+@app.get("/stats")
+async def get_stats():
+    """Get user statistics and achievements"""
+    return {
+        "total_study_time": user_stats.total_study_time,
+        "current_streak": user_stats.current_streak,
+        "longest_streak": user_stats.longest_streak,
+        "last_study_date": user_stats.last_study_date,
+        "achievement": [ach for ach in user_stats.achievements.values() if ach.unlocked]
+    }
